@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>附件文件统计插件</title>
+  <style>
+    :root {
+      --primary-color: #0089FF;
+      --bg-color: #f7f8fa;
+      --card-bg: #ffffff;
+      --text-main: #1d2129;
+      --text-sub: #86909c;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      font-size: 14px;
+    }
+
+    .container {
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    p.desc {
+      margin: 0 0 16px;
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 10px;
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: #0070d9;
+    }
+
+    .btn-primary:disabled {
+      background-color: #c0c4cc;
+      cursor: not-allowed;
+    }
+
+    .result-card {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 6px;
+      display: none;
+      text-align: center;
+    }
+
+    .result-card.success {
+      background-color: #e8ffea;
+      color: #00b42a;
+      border: 1px solid #aff0b5;
+    }
+
+    .result-card.error {
+      background-color: #fff1f0;
+      color: #f53f3f;
+      border: 1px solid #ffece6;
+    }
+
+    .result-number {
+      font-size: 24px;
+      font-weight: bold;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .error-list {
+      margin-top: 12px;
+      text-align: left;
+      font-size: 12px;
+      color: #f53f3f;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    
+    .error-item {
+      padding: 4px 0;
+      border-bottom: 1px dashed #ffece6;
+    }
+
+    footer {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 10px;
+      color: #ccc;
+    }
+
+    .input-row {
+      margin-top: 12px;
+    }
+
+    .input-label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-bottom: 6px;
+    }
+
+    .text-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid #e5e6eb;
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h3>📂 附件列文件统计</h3>
+    <p class="desc">1. 在表格中框选需要统计的行范围（任意列均可）<br>2. 选择附件列与写回列<br>3. 点击按钮开始统计（支持自动解压 ZIP 并统计内部文档）</p>
+
+    <div class="input-row">
+      <span class="input-label">附件列</span>
+      <select id="attachmentFieldId" class="text-input"></select>
+    </div>
+
+    <div class="input-row">
+      <span class="input-label">写回列（每行文档数）</span>
+      <select id="outputFieldId" class="text-input"></select>
+    </div>
+    
+    <button id="countBtn" class="btn-primary" onclick="startCount()">开始统计</button>
+    
+    <div id="resultCard" class="result-card">
+      <span id="resultText" class="result-number">0</span>
+      <div id="resultLabel">个文档</div>
+      <div id="errorList" class="error-list"></div>
+    </div>
+  </div>
+
+  <footer>Powered by DingTalk AI Table Addon</footer>
+
+  <script>
+    async function loadFields() {
+      try {
+        if (typeof Dingdocs === 'undefined' || !Dingdocs.script || typeof Dingdocs.script.run !== 'function') {
+          return;
+        }
+
+        const attachmentSelect = document.getElementById('attachmentFieldId');
+        const outputSelect = document.getElementById('outputFieldId');
+
+        const fields = await Dingdocs.script.run('getSheetFields', {});
+        const safeFields = Array.isArray(fields) ? fields : [];
+
+        attachmentSelect.innerHTML = '';
+        outputSelect.innerHTML = '';
+
+        const allOpt = document.createElement('option');
+        allOpt.value = '';
+        allOpt.textContent = '按选区全部附件列';
+        attachmentSelect.appendChild(allOpt);
+
+        safeFields.filter((f) => f && f.type === 'attachment').forEach((f) => {
+          const opt = document.createElement('option');
+          opt.value = f.id;
+          opt.textContent = f.name;
+          attachmentSelect.appendChild(opt);
+        });
+
+        const noWriteOpt = document.createElement('option');
+        noWriteOpt.value = '';
+        noWriteOpt.textContent = '不写回';
+        outputSelect.appendChild(noWriteOpt);
+
+        let defaultOutputId = '';
+        safeFields.forEach((f) => {
+          const opt = document.createElement('option');
+          opt.value = f.id;
+          opt.textContent = `${f.name}（${f.type}）`;
+          outputSelect.appendChild(opt);
+          if (!defaultOutputId && f.name === '文档数') defaultOutputId = f.id;
+        });
+
+        if (defaultOutputId) outputSelect.value = defaultOutputId;
+      } catch (e) {
+        return;
+      }
+    }
+
+    async function startCount() {
+      const btn = document.getElementById('countBtn');
+      const card = document.getElementById('resultCard');
+      const text = document.getElementById('resultText');
+      const label = document.getElementById('resultLabel');
+      const errList = document.getElementById('errorList');
+
+      btn.disabled = true;
+      btn.innerText = '正在读取与解压...';
+      card.style.display = 'none';
+      errList.innerHTML = '';
+
+      try {
+        const attachmentFieldId = document.getElementById('attachmentFieldId').value;
+        const outputFieldId = document.getElementById('outputFieldId').value;
+        const res = await Dingdocs.script.run('countAttachmentFiles', {
+          attachmentFieldId: attachmentFieldId,
+          outputFieldId: outputFieldId
+        });
+
+        if (!res.success) {
+          throw new Error(res.message || '未知错误');
+        }
+
+        card.style.display = 'block';
+        card.className = 'result-card success';
+        text.innerText = res.total;
+        label.innerText = '个文档';
+
+        if (res.errors && res.errors.length > 0) {
+          res.errors.forEach(msg => {
+            const div = document.createElement('div');
+            div.className = 'error-item';
+            div.innerText = msg;
+            errList.appendChild(div);
+          });
+        }
+
+      } catch (e) {
+        card.style.display = 'block';
+        card.className = 'result-card error';
+        text.innerText = '错误';
+        label.innerText = '';
+        errList.innerHTML = `<div class="error-item">${e.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '开始统计';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadFields();
+      setTimeout(loadFields, 600);
+    });
+  </script>
+</body>
+</html>
